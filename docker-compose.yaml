@@ -1,0 +1,114 @@
+services:
+  postgres:
+    image: postgres:17
+    container_name: ${POSTGRES_DATABASE_CONTAINER_NAME}
+    command: postgres -c max_connections=$POSTGRES_MAX_CONNECTIONS
+    env_file:
+      - .env
+    ports:
+      - "$POSTGRES_PORT:$POSTGRES_PORT"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+      interval: $POSTGRES_HEALTH_CHECK_INTERVAL
+      timeout: $POSTGRES_HEALTH_CHECK_TIMEOUT
+      retries: $POSTGRES_HEALTH_CHECK_RETRIES
+    networks:
+      - psqldb-network
+
+  pgbouncer:
+    image: edoburu/pgbouncer
+    container_name: ${PGBOUNCER_CONTAINER_NAME}
+    env_file:
+      - .env
+    ports:
+      - "$PGBOUNCER_PORT:$PGBOUNCER_PORT"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "cat /proc/1/status | grep -q pgbouncer"]
+      interval: $PGBOUNCER_HEALTH_CHECK_INTERVAL
+      timeout: $PGBOUNCER_HEALTH_CHECK_TIMEOUT
+      retries: $PGBOUNCER_HEALTH_CHECK_RETRIES
+    networks:
+      - psqldb-network
+
+  postgres_exporter:
+    image: quay.io/prometheuscommunity/postgres-exporter
+    container_name: ${POSTGRES_EXPORTER_CONTAINER_NAME}
+    env_file:
+      - .env
+    environment:
+      DATA_SOURCE_URI: "postgres:${POSTGRES_PORT}/${POSTGRES_DB}?sslmode=disable"
+      DATA_SOURCE_USER: "${POSTGRES_USER}"
+      DATA_SOURCE_PASS: "${POSTGRES_PASSWORD}"
+    ports:
+      - "$POSTGRES_EXPORTER_PORT:$POSTGRES_EXPORTER_PORT"
+    networks:
+      - psqldb-network
+    depends_on:
+      - postgres
+    restart: always
+  
+  pgbouncer_exporter:
+    image: prometheuscommunity/pgbouncer-exporter
+    container_name: ${PGBOUNCER_EXPORTER_CONTAINER_NAME}
+    command:
+      - "--pgBouncer.connectionString=postgres://test:test@pgbouncer:6432/pgbouncer?sslmode=disable"
+    ports:
+      - "9127:9127"
+    networks:
+      - psqldb-network
+    depends_on:
+      - pgbouncer
+    restart: on-failure
+
+  renderer:
+    image: grafana/grafana-image-renderer:latest
+    container_name: ${GRAFANA_RENDERER_CONTAINER_NAME}
+    expose:
+      - "$GRAFANA_RENDERING_PORT"
+    networks:
+      - psqldb-network
+    restart: on-failure
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: ${GRAFANA_CONTAINER_NAME}
+    ports:
+      - 3000:3000
+    env_file:
+      - .env
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources
+    networks:
+      - psqldb-network
+    depends_on:
+      - renderer
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: ${PROMETHEUS_CONTAINER_NAME}
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "$PROMETHEUS_PORT:$PROMETHEUS_PORT"
+    networks:
+      - psqldb-network
+    depends_on:
+      - postgres_exporter
+    restart: on-failure
+
+networks:
+  psqldb-network:
+    driver: bridge
+
+volumes:
+  grafana_data:
+  postgres_data:
+  prometheus_data:
