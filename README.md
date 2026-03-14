@@ -3,8 +3,6 @@
 A hands-on demonstration of PgBouncer's connection pooling benefits, using pgbench for load
 generation, Prometheus for metrics collection, and Grafana for visualization.
 
-This project accompanies the article: [article link]
-
 ## Overview
 
 The demo runs two benchmarks and lets you observe the results in real time through Grafana:
